@@ -19,5 +19,5 @@ pub fn gatt_characteristic(metadata: TokenStream, input: TokenStream) -> TokenSt
         parse_macro_input::parse::<gatt_characteristic::GattCharacteristicArgs>(metadata).unwrap();
     let ast = syn::parse(input).unwrap();
 
-    gatt_characteristic::apply_macro(&ast, args.uuid.unwrap(), args.flags, args.path, args.paged).into()
+    gatt_characteristic::apply_macro(&ast, args.uuid.unwrap(), args.flags, args.path).into()
 }

@@ -12,7 +12,6 @@ pub struct GattCharacteristicArgs {
     pub flags: Option<ExprArray>,
     pub service: Option<ExprLit>,
     pub path: Option<ExprLit>,
-    pub paged: Option<ExprLit>,
 }
 
 impl GattCharacteristicArgs {
@@ -21,7 +20,6 @@ impl GattCharacteristicArgs {
         let mut flags = None;
         let mut service = None;
         let mut path = None;
-        let mut paged = None;
 
         if let ArgValueType::Str(Some(val)) = value_map.get("uuid").unwrap() {
             uuid = Some(val.to_owned());
@@ -35,9 +33,6 @@ impl GattCharacteristicArgs {
         if let ArgValueType::Str(Some(val)) = value_map.get("service").unwrap() {
             service = Some(val.to_owned());
         }
-        if let ArgValueType::Bool(Some(val)) = value_map.get("paged").unwrap() {
-            paged = Some(val.to_owned());
-        }
 
         if let None = uuid {
             return Err(stream.error("uuid must be defined"));
@@ -48,7 +43,6 @@ impl GattCharacteristicArgs {
             flags,
             service,
             path,
-            paged,
         })
     }
 }
@@ -62,7 +56,6 @@ impl Parse for GattCharacteristicArgs {
             ("flags".into(), ArgValueType::VecStr(None)),
             ("service".into(), ArgValueType::Str(None)),
             ("path".into(), ArgValueType::Str(None)),
-            ("paged".into(), ArgValueType::Bool(None)),
         ]);
 
         for expr in expressions {
@@ -79,7 +72,6 @@ pub fn apply_macro(
     uuid: ExprLit,
     flags: Option<ExprArray>,
     path: Option<ExprLit>,
-    paged: Option<ExprLit>,
 ) -> TokenStream {
     let name = &ast.ident;
     let name_str = name.clone().to_string();
@@ -107,12 +99,11 @@ pub fn apply_macro(
         None => quote! { [] },
     };
 
-    let (gatt_interface_methods, gatt_priv_methods) = generate_gatt_methods(&flags, &paged);
+    let (gatt_interface_methods, gatt_priv_methods) = generate_gatt_methods(&flags);
 
     let gen = quote! {
         use gattrs::*;
         use gattrs::zbus::*;
-        use std::result::Result;
 
         #[derive(derivative::Derivative)]
         #[derivative(Default)]
@@ -181,17 +172,11 @@ pub fn apply_macro(
     gen.into()
 }
 
-fn generate_gatt_methods(
-    flags: &Option<ExprArray>,
-    paged: &Option<ExprLit>,
-) -> (TokenStream, TokenStream) {
+fn generate_gatt_methods(flags: &Option<ExprArray>) -> (TokenStream, TokenStream) {
     let mut read_fn = quote! {};
     let mut write_fn = quote! {};
     let mut notify_fns = quote! {};
     let mut notify_priv_fn = quote! {};
-
-    let mut is_read = false;
-    let mut is_notify = false;
 
     if let Some(ExprArray { elems, .. }) = flags {
         for expr in elems {
@@ -202,7 +187,6 @@ fn generate_gatt_methods(
             {
                 let val = literal.value();
                 if val.contains("read") {
-                    is_read = true;
                     read_fn = quote! {
                         async fn read_value(
                             &self,
@@ -226,7 +210,6 @@ fn generate_gatt_methods(
                         }
                     };
                 } else if val.contains("notify") {
-                    is_notify = true;
                     notify_fns = quote! {
                         async fn start_notify(
                             &self,
@@ -264,49 +247,7 @@ fn generate_gatt_methods(
             }
         }
     }
-    if let Some(ExprLit {
-        lit: Lit::Bool(val),
-        ..
-    }) = paged
-    {
-        if val.value == true {
-            if is_read == false || is_notify == false {
-                panic!("Paged characteristics require \"read\" and \"notify\" flags");
-            }
-            read_fn = quote! {
-                async fn read_value(
-                    &mut self,
-                    _opts: std::collections::HashMap<String, zbus::zvariant::Value<'_>>,
-                    #[zbus(connection)] bus: &zbus::Connection,
-                ) -> zbus::fdo::Result<Vec<u8>> {
-                    println!("read");
-                    let read_res = self.read().await;
-                    match read_res {
-                        Ok(value) => {
-                            let mut sent_byte_count = 0;
-                            while sent_byte_count < value.len() {
-                                let slice_outer_bound = std::cmp::min(sent_byte_count + 512, value.len());
-                                let bytes = &value[sent_byte_count..slice_outer_bound];
-                                let notify_res = self.notify(bytes.to_vec()).await;
-                                match notify_res {
-                                    Ok(()) => {
-                                        sent_byte_count = slice_outer_bound;
-                                        continue;
-                                    }
-                                    Err(err) => {
-                                        println!("{}", err);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        Err(err) => println!("{}", err)
-                    }
-                    Ok("paging".as_bytes().to_vec())
-                }
-            };
-        }
-    }
+
     let interface_methods = quote! { #read_fn #write_fn #notify_fns };
     let priv_methods = quote! { #notify_priv_fn };
 
