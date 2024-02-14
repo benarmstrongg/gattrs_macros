@@ -92,8 +92,8 @@ pub fn apply_macro(
     };
 
     let gen = quote! {
-        use amby_server::*;
-        use amby_server::zbus::*;
+        use gattrs::*;
+        use gattrs::zbus::*;
 
         #[derive(derivative::Derivative)]
         #[derivative(Default)]
@@ -121,8 +121,8 @@ pub fn apply_macro(
             }
          }
 
-         #[amby_server::async_trait::async_trait]
-         impl amby_server::gatt::ServiceRegister for #name {
+         #[gattrs::async_trait::async_trait]
+         impl gattrs::gatt::ServiceRegister for #name {
             fn get_uuid(&self) -> String {
                 String::from(#uuid)
             }

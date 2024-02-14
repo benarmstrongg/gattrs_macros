@@ -48,7 +48,7 @@ impl GattCharacteristicArgs {
             flags,
             service,
             path,
-            paged, 
+            paged,
         })
     }
 }
@@ -62,7 +62,7 @@ impl Parse for GattCharacteristicArgs {
             ("flags".into(), ArgValueType::VecStr(None)),
             ("service".into(), ArgValueType::Str(None)),
             ("path".into(), ArgValueType::Str(None)),
-            ("paged".into(), ArgValueType::Bool(None))
+            ("paged".into(), ArgValueType::Bool(None)),
         ]);
 
         for expr in expressions {
@@ -110,8 +110,8 @@ pub fn apply_macro(
     let (gatt_interface_methods, gatt_priv_methods) = generate_gatt_methods(&flags, &paged);
 
     let gen = quote! {
-        use amby_server::*;
-        use amby_server::zbus::*;
+        use gattrs::*;
+        use gattrs::zbus::*;
         use std::result::Result;
 
         #[derive(derivative::Derivative)]
@@ -155,8 +155,8 @@ pub fn apply_macro(
             #gatt_priv_methods
          }
 
-         #[amby_server::async_trait::async_trait]
-         impl amby_server::gatt::CharacteristicRegister for #name {
+         #[gattrs::async_trait::async_trait]
+         impl gattrs::gatt::CharacteristicRegister for #name {
             fn get_path(&self, service_path: zbus::zvariant::ObjectPath<'static>) -> zbus::zvariant::ObjectPath<'static> {
                 match zbus::zvariant::ObjectPath::from_static_str(#chrc_path) {
                     Ok(path) => path,
@@ -181,7 +181,10 @@ pub fn apply_macro(
     gen.into()
 }
 
-fn generate_gatt_methods(flags: &Option<ExprArray>, paged: &Option<ExprLit>) -> (TokenStream, TokenStream) {
+fn generate_gatt_methods(
+    flags: &Option<ExprArray>,
+    paged: &Option<ExprLit>,
+) -> (TokenStream, TokenStream) {
     let mut read_fn = quote! {};
     let mut write_fn = quote! {};
     let mut notify_fns = quote! {};
@@ -261,7 +264,11 @@ fn generate_gatt_methods(flags: &Option<ExprArray>, paged: &Option<ExprLit>) -> 
             }
         }
     }
-    if let Some(ExprLit {lit: Lit::Bool(val), .. }) = paged {
+    if let Some(ExprLit {
+        lit: Lit::Bool(val),
+        ..
+    }) = paged
+    {
         if val.value == true {
             if is_read == false || is_notify == false {
                 panic!("Paged characteristics require \"read\" and \"notify\" flags");
@@ -292,14 +299,13 @@ fn generate_gatt_methods(flags: &Option<ExprArray>, paged: &Option<ExprLit>) -> 
                                     }
                                 }
                             }
-                        }  
+                        }
                         Err(err) => println!("{}", err)
                     }
                     Ok("paging".as_bytes().to_vec())
                 }
             };
         }
-       
     }
     let interface_methods = quote! { #read_fn #write_fn #notify_fns };
     let priv_methods = quote! { #notify_priv_fn };
