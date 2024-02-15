@@ -109,7 +109,7 @@ pub fn apply_macro(
         #[derivative(Default)]
         #visibility struct #name {
             service: Option<zbus::zvariant::ObjectPath<'static>>,
-            notification_message: Vec<u8>,
+            value: Vec<u8>,
             path: zbus::zvariant::ObjectPath<'static>,
             bus: Option<zbus::Connection>,
 
@@ -136,7 +136,7 @@ pub fn apply_macro(
 
             #[dbus_interface(property)]
             fn value(&self) -> &[u8] {
-                self.notification_message.as_slice()
+                self.value.as_slice()
             }
 
             #gatt_interface_methods
@@ -162,7 +162,6 @@ pub fn apply_macro(
             ) -> zbus::Result<bool> {
                 let path = self.get_path(service_path.clone());
                 self.path = path.clone();
-                println!("{}", &service_path);
                 self.service = Some(service_path);
                 self.bus = Some(bus.clone());
                 bus.object_server().at(path, self).await
@@ -174,7 +173,7 @@ pub fn apply_macro(
 
 fn generate_gatt_methods(flags: &Option<ExprArray>) -> (TokenStream, TokenStream) {
     let mut read_fn = quote! {};
-    let mut write_fn = quote! {};
+    let mut write_fn_opt = None;
     let mut notify_fns = quote! {};
     let mut notify_priv_fn = quote! {};
 
@@ -193,22 +192,22 @@ fn generate_gatt_methods(flags: &Option<ExprArray>) -> (TokenStream, TokenStream
                             _opts: std::collections::HashMap<String, zbus::zvariant::Value<'_>>,
                             #[zbus(connection)] bus: &zbus::Connection,
                         ) -> zbus::fdo::Result<Vec<u8>> {
-                            println!("read");
                             self.read().await
                         }
                     };
-                } else if val.contains("write") {
-                    write_fn = quote! {
+                } else if val.contains("write") && write_fn_opt.is_none() {
+                    write_fn_opt = Some(quote! {
                         async fn write_value(
                             &mut self,
                             value: &[u8],
                             _opts: std::collections::HashMap<String, zbus::zvariant::Value<'_>>,
                             #[zbus(connection)] bus: &zbus::Connection,
                         ) -> zbus::fdo::Result<()> {
-                            println!("write");
-                            self.write(value).await
+                            let res = self.write(value).await;
+                            self.value = value.to_vec();
+                            res
                         }
-                    };
+                    });
                 } else if val.contains("notify") {
                     notify_fns = quote! {
                         async fn start_notify(
@@ -216,26 +215,35 @@ fn generate_gatt_methods(flags: &Option<ExprArray>) -> (TokenStream, TokenStream
                             #[zbus(header)] _header: zbus::MessageHeader<'_>,
                             #[zbus(signal_context)] _ctxt: zbus::SignalContext<'_>,
                         ) -> zbus::fdo::Result<()> {
-                            println!("notifications started");
                             Ok(())
                         }
                         async fn stop_notify(
                             &self,
-                            #[zbus(header)] header: zbus::MessageHeader<'_>,
-                            #[zbus(signal_context)] ctxt: zbus::SignalContext<'_>,
+                            #[zbus(header)] _header: zbus::MessageHeader<'_>,
+                            #[zbus(signal_context)] _ctxt: zbus::SignalContext<'_>,
                         ) -> zbus::fdo::Result<()> {
-                            println!("notifications stopped");
                             Ok(())
                         }
                     };
-                    notify_priv_fn = quote! {
-                        async fn notify(
+
+                    write_fn_opt = Some(quote! {
+                        async fn write_value(
                             &mut self,
-                            message: Vec<u8>,
+                            value: &[u8],
+                            _opts: std::collections::HashMap<String, zbus::zvariant::Value<'_>>,
+                            #[zbus(connection)] bus: &zbus::Connection,
                         ) -> zbus::fdo::Result<()> {
+                            let ctxt = zbus::SignalContext::new(bus, &self.path)?;
+                            let res = self.write(value).await;
+                            self.value = value.to_vec();
+                            self.value_changed(&ctxt).await?;
+                            res
+                        }
+                    });
+                    notify_priv_fn = quote! {
+                        async fn notify(&mut self) -> zbus::fdo::Result<()> {
                             if let Some(bus) = self.bus.as_ref() {
                                 let ctxt = zbus::SignalContext::new(bus, &self.path).unwrap();
-                                self.notification_message = message;
                                 self.value_changed(&ctxt).await?;
                             }
                             Ok(())
@@ -248,6 +256,7 @@ fn generate_gatt_methods(flags: &Option<ExprArray>) -> (TokenStream, TokenStream
         }
     }
 
+    let write_fn = write_fn_opt.unwrap_or(quote! {});
     let interface_methods = quote! { #read_fn #write_fn #notify_fns };
     let priv_methods = quote! { #notify_priv_fn };
 
