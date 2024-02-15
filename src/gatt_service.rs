@@ -142,7 +142,6 @@ pub fn apply_macro(
                 bus: zbus::Connection,
                 app_path: zbus::zvariant::ObjectPath<'static>,
             ) -> Result<bool> {
-                println!("service register started");
                 let characteristics = self.get_characteristics();
                 let path = self.get_path(app_path);
                 self.characteristic_paths = characteristics
@@ -151,7 +150,6 @@ pub fn apply_macro(
                     .collect::<Vec<zbus::zvariant::ObjectPath<'_>>>();
                 for chrc in characteristics {
                     chrc.register(bus.clone(), path.clone()).await?;
-                    println!("chrc registered");
                 }
                 bus.object_server().at(path, self).await
             }
